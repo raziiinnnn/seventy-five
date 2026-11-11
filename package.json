@@ -1,0 +1,27 @@
+{
+  "name": "seventy-five",
+  "version": "1.0.0",
+  "description": "Attendance safety meter for students. Know how many classes you can skip and stay above 75%. Free, private, works offline.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raziiinnnn/seventy-five.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/raziiinnnn/seventy-five/issues"
+  },
+  "homepage": "https://github.com/raziiinnnn/seventy-five#readme",
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
