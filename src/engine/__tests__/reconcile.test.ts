@@ -5,7 +5,7 @@
  * - applyLocalOverlay: current subject (no overlay) vs stale subject (4 days overlay)
  * - inferAsOfDateAndReconcile: walking forward to match deltaY
  * - Conflict detection: local 0 absences vs ETLAB deltaMissed = 3
- * - DL lifecycle: pending → reflected; applied → applied_not_reflected
+ * - DL lifecycle: logged / certificate_received / applied → reflected; applied → applied_not_reflected
  */
 
 import { describe, it, expect } from "vitest";
@@ -107,16 +107,18 @@ describe("applyLocalOverlay", () => {
     expect(result.subjects[0]!.total).toBe(76);    // +1
   });
 
-  it("pending DL records appear in pendingDLs", () => {
+  it("logged, certificate_received, and applied DL records appear in pendingDLs", () => {
     const anchors: EtlabAnchor[] = [
       { subjectId: "CS101", attended: 60, total: 75, missed: 15, dutyLeave: 0, asOfDate: "2024-11-04" },
     ];
     const dlRecords: DLRecord[] = [
-      { id: "dl1", subjectId: "CS101", hours: 2, status: "pending", logDates: ["2024-11-05"] },
+      { id: "dl1", subjectId: "CS101", hours: 2, status: "logged", logDates: ["2024-11-05"] },
+      { id: "dl2", subjectId: "CS101", hours: 1, status: "certificate_received", logDates: ["2024-11-06"] },
+      { id: "dl3", subjectId: "CS101", hours: 3, status: "applied", logDates: ["2024-11-07"] },
     ];
     const result = applyLocalOverlay(anchors, [], dlRecords);
-    expect(result.pendingDLs).toHaveLength(1);
-    expect(result.pendingDLs[0]!.hours).toBe(2);
+    expect(result.pendingDLs).toHaveLength(3);
+    expect(result.pendingDLs.map((d) => d.hours)).toEqual([2, 1, 3]);
   });
 
   it("reflected DL records do NOT appear in pendingDLs", () => {
@@ -269,14 +271,28 @@ describe("inferAsOfDateAndReconcile — conflict detection", () => {
 // inferAsOfDateAndReconcile — DL lifecycle
 // ---------------------------------------------------------------------------
 describe("inferAsOfDateAndReconcile — DL lifecycle", () => {
-  it("pending DL auto-closes as 'reflected' when ETLAB dutyLeave rises by enough", () => {
+  it("logged DL auto-closes as 'reflected' when ETLAB dutyLeave rises by enough", () => {
     const anchor: EtlabAnchor = {
       subjectId: "CS101", attended: 60, total: 75, missed: 10, dutyLeave: 0,
       asOfDate: "2024-11-03",
     };
     const snap: EtlabSnapshot = { attended: 62, total: 76, missed: 10, dutyLeave: 2 };
     const dlRecords: DLRecord[] = [
-      { id: "dl1", subjectId: "CS101", hours: 2, status: "pending", logDates: ["2024-11-04"] },
+      { id: "dl1", subjectId: "CS101", hours: 2, status: "logged", logDates: ["2024-11-04"] },
+    ];
+    const result = inferAsOfDateAndReconcile(anchor, snap, [], timetable, noOverrides, dlRecords);
+    const dl = result.updatedDLRecords.find((d) => d.id === "dl1")!;
+    expect(dl.status).toBe("reflected");
+  });
+
+  it("'certificate_received' DL auto-closes as 'reflected' when ETLAB dutyLeave rises by enough", () => {
+    const anchor: EtlabAnchor = {
+      subjectId: "CS101", attended: 60, total: 75, missed: 10, dutyLeave: 0,
+      asOfDate: "2024-11-03",
+    };
+    const snap: EtlabSnapshot = { attended: 62, total: 76, missed: 10, dutyLeave: 2 };
+    const dlRecords: DLRecord[] = [
+      { id: "dl1", subjectId: "CS101", hours: 2, status: "certificate_received", logDates: ["2024-11-04"] },
     ];
     const result = inferAsOfDateAndReconcile(anchor, snap, [], timetable, noOverrides, dlRecords);
     const dl = result.updatedDLRecords.find((d) => d.id === "dl1")!;
@@ -304,14 +320,14 @@ describe("inferAsOfDateAndReconcile — DL lifecycle", () => {
     };
     const snap: EtlabSnapshot = { attended: 61, total: 76, missed: 10, dutyLeave: 2 };
     const dlRecords: DLRecord[] = [
-      { id: "dl2", subjectId: "MA101", hours: 2, status: "pending", logDates: ["2024-11-04"] },
+      { id: "dl2", subjectId: "MA101", hours: 2, status: "logged", logDates: ["2024-11-04"] },
     ];
     const result = inferAsOfDateAndReconcile(anchor, snap, [], timetable, noOverrides, dlRecords);
     const dl = result.updatedDLRecords.find((d) => d.id === "dl2")!;
-    expect(dl.status).toBe("pending"); // untouched
+    expect(dl.status).toBe("logged"); // untouched
   });
 
-  it("partial DL coverage: first DL reflected, second stays pending", () => {
+  it("partial DL coverage: first DL reflected, second stays logged", () => {
     const anchor: EtlabAnchor = {
       subjectId: "CS101", attended: 60, total: 75, missed: 10, dutyLeave: 0,
       asOfDate: "2024-11-03",
@@ -319,14 +335,14 @@ describe("inferAsOfDateAndReconcile — DL lifecycle", () => {
     // dutyLeave rose by 2 → enough to close dl1 (2h) but not dl2 (3h)
     const snap: EtlabSnapshot = { attended: 62, total: 76, missed: 10, dutyLeave: 2 };
     const dlRecords: DLRecord[] = [
-      { id: "dl1", subjectId: "CS101", hours: 2, status: "pending", logDates: ["2024-11-04"] },
-      { id: "dl2", subjectId: "CS101", hours: 3, status: "pending", logDates: ["2024-11-05"] },
+      { id: "dl1", subjectId: "CS101", hours: 2, status: "logged", logDates: ["2024-11-04"] },
+      { id: "dl2", subjectId: "CS101", hours: 3, status: "certificate_received", logDates: ["2024-11-05"] },
     ];
     const result = inferAsOfDateAndReconcile(anchor, snap, [], timetable, noOverrides, dlRecords);
     const dl1 = result.updatedDLRecords.find((d) => d.id === "dl1")!;
     const dl2 = result.updatedDLRecords.find((d) => d.id === "dl2")!;
     expect(dl1.status).toBe("reflected");
-    expect(dl2.status).toBe("pending"); // budget exhausted
+    expect(dl2.status).toBe("certificate_received"); // budget exhausted
   });
 });
 

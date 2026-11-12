@@ -80,7 +80,8 @@ export interface EtlabSnapshot {
 // ---------------------------------------------------------------------------
 
 export type DLStatus =
-  | "pending"               // student logged a DL period; ETLAB not yet updated
+  | "logged"                // student logged a DL period; certificate/application pending
+  | "certificate_received"  // student received proof/certificate; not yet applied on ETLAB
   | "applied"               // student believes it has been submitted
   | "reflected"             // ETLAB dutyLeave rose to match; auto-closed
   | "applied_not_reflected"; // student marked applied but ETLAB dutyLeave didn't rise

@@ -133,7 +133,20 @@ export async function importAppDataJSON(jsonStr: string): Promise<void> {
 /** Lightweight shareable format — subjects + timetable only, no personal data. */
 export interface ClassTemplate {
   v: number;
-  subjects: Array<Pick<SubjectRow, "id" | "code" | "name" | "kind" | "hoursPerSession" | "sortOrder" | "isExamSubject">>;
+  subjects: Array<
+    Pick<
+      SubjectRow,
+      | "id"
+      | "code"
+      | "name"
+      | "kind"
+      | "hoursPerSession"
+      | "sortOrder"
+      | "isExamSubject"
+      | "slotLetter"
+      | "creditWise"
+    >
+  >;
   timetable: TimetableRow[];
 }
 
@@ -148,15 +161,29 @@ export function generateClassTemplateString(
 ): string {
   const template: ClassTemplate = {
     v: BACKUP_VERSION,
-    subjects: subjects.map(({ id, code, name, kind, hoursPerSession, sortOrder, isExamSubject }) => ({
-      id,
-      code,
-      name,
-      kind,
-      hoursPerSession,
-      sortOrder,
-      isExamSubject,
-    })),
+    subjects: subjects.map(
+      ({
+        id,
+        code,
+        name,
+        kind,
+        hoursPerSession,
+        sortOrder,
+        isExamSubject,
+        slotLetter,
+        creditWise,
+      }) => ({
+        id,
+        code,
+        name,
+        kind,
+        hoursPerSession,
+        sortOrder,
+        isExamSubject,
+        ...(slotLetter !== undefined ? { slotLetter } : {}),
+        ...(creditWise !== undefined ? { creditWise } : {}),
+      })
+    ),
     timetable,
   };
   // Compact — no pretty-printing to keep the QR payload small
@@ -185,6 +212,7 @@ export async function importClassTemplate(templateStr: string): Promise<void> {
       attended: 0,
       total: 0,
       missed: 0,
+      leave: 0,
       dutyLeave: 0,
       asOfDate: new Date().toISOString().slice(0, 10),
     }));

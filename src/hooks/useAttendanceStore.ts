@@ -49,11 +49,11 @@ export function subjectRowsToEngineSubjects(rows: SubjectRow[]): Subject[] {
   }));
 }
 
-/** Returns the aggregate attended/total using Step 1's overallOf. */
+/** Returns the aggregate attended/total using Step 1's overallOf on effective subjects (with local logs). */
 export function useOverallAttendance() {
-  const subjects = useSubjects();
+  const subjects = useEffectiveSubjects();
   if (!subjects) return undefined;
-  return overallOf(subjectRowsToEngineSubjects(subjects));
+  return overallOf(subjects);
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +122,7 @@ export function useCatchUpQueue(lastCheckedDate: string, todayDate: string): Cat
 /** Returns all non-retired daily logs. */
 export function useDailyLogs(): DailyLogRow[] | undefined {
   return useLiveQuery(
-    () => db.dailyLogs.where("retired").equals(0).toArray(),
+    () => db.dailyLogs.filter((l) => !l.retired).toArray(),
     []
   );
 }
@@ -130,7 +130,12 @@ export function useDailyLogs(): DailyLogRow[] | undefined {
 /** Returns all logs for a specific date. */
 export function useLogsForDate(date: string): DailyLogRow[] | undefined {
   return useLiveQuery(
-    () => db.dailyLogs.where({ date, retired: 0 }).toArray(),
+    () =>
+      db.dailyLogs
+        .where("date")
+        .equals(date)
+        .filter((l) => !l.retired)
+        .toArray(),
     [date]
   );
 }

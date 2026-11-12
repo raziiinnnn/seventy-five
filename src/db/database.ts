@@ -7,7 +7,7 @@
  */
 
 import Dexie, { type EntityTable } from "dexie";
-import type { CalendarOverride, ScheduledPeriod } from "@/engine/types2";
+import type { CalendarOverride, DLStatus, ScheduledPeriod } from "@/engine/types2";
 
 // ---------------------------------------------------------------------------
 // Row types (what actually lives in IndexedDB)
@@ -31,6 +31,7 @@ export interface SubjectRow {
   /** Stable UUID (nanoid or crypto.randomUUID) assigned at creation. */
   id: string;
   code: string;
+  slotLetter?: string;
   name: string;
   kind: "theory" | "lab";
   /** Hours per session (1 for theory; variable for labs). */
@@ -39,7 +40,9 @@ export interface SubjectRow {
   attended: number;
   total: number;
   missed: number;
+  leave: number;
   dutyLeave: number;
+  creditWise?: string;
   /**
    * The last date ETLAB data is confirmed accurate for this subject.
    * Local daily logs AFTER this date form the overlay.
@@ -93,7 +96,7 @@ export interface DLRecordRow {
   hours: number;
   /** Dates of the missed periods covered by this DL. */
   logDates: string[];
-  status: "logged" | "certificate_received" | "applied" | "reflected" | "applied_not_reflected";
+  status: DLStatus;
   createdAt: string;   // ISO 8601
 }
 
@@ -112,12 +115,12 @@ export class AttendanceDB extends Dexie {
   constructor() {
     super("AttendanceDB");
     this.version(1).stores({
-      // Primary key first, then indexed fields
+      // Primary key first, then indexed fields (booleans like `retired` are not valid IndexedDB keys)
       profile: "id",
       subjects: "id, code, kind, asOfDate, sortOrder",
       timetable: "weekday",
       calendarOverrides: "date",
-      dailyLogs: "++id, date, subjectId, [date+subjectId], retired",
+      dailyLogs: "++id, date, subjectId, [date+subjectId]",
       dlRecords: "id, subjectId, status, createdAt",
     });
   }

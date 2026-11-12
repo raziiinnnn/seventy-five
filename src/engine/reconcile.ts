@@ -26,6 +26,15 @@ import { getScheduledPeriodsForDate } from "./calendar.js";
 // Date comparison helper (string-only, no Date objects)
 // ---------------------------------------------------------------------------
 
+/** Returns true if a DL status represents an active, unreflected claim. */
+function isActiveUnreflectedDL(status: DLStatus): boolean {
+  return (
+    status === "logged" ||
+    status === "certificate_received" ||
+    status === "applied"
+  );
+}
+
 /** Returns true if `a` is strictly before `b` (both "YYYY-MM-DD"). */
 function dateLT(a: string, b: string): boolean {
   return a < b; // ISO strings compare lexicographically
@@ -107,10 +116,10 @@ export function applyLocalOverlay(
     });
   }
 
-  // Collect pending DLs: DL records with status "pending" or "applied" that
-  // have not yet been reflected in ETLAB (i.e., the anchor hasn't moved past them).
+  // Collect pending DLs: DL records with active unreflected statuses ("logged",
+  // "certificate_received", or "applied") that have not yet been reflected in ETLAB.
   const pendingDLs: PendingDL[] = dlRecords
-    .filter((dl) => dl.status === "pending" || dl.status === "applied")
+    .filter((dl) => isActiveUnreflectedDL(dl.status))
     .filter((dl) => anchorMap.has(dl.subjectId))
     .map((dl) => ({
       subjectId: dl.subjectId,
@@ -259,7 +268,7 @@ export function inferAsOfDateAndReconcile(
   const updatedDLRecords: DLRecord[] = dlRecords.map((dl) => {
     if (dl.subjectId !== subjectId) return dl;
 
-    if (dl.status === "pending" || dl.status === "applied") {
+    if (isActiveUnreflectedDL(dl.status)) {
       if (dlBudget >= dl.hours) {
         // ETLAB's dutyLeave rose enough to cover this DL → auto-close
         dlBudget -= dl.hours;
