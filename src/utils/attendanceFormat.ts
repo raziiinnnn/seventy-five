@@ -1,9 +1,46 @@
 /**
- * Display-only attendance formatting helpers.
+ * Display-only attendance and date formatting helpers.
  * Never used for 75% safety logic (which always uses Step 1 integer math).
  */
 
+import { getWeekdayKey } from "@/engine/calendar";
+import type { Weekday } from "@/engine/types2";
+
 export type SafetyTone = "safe" | "careful" | "red";
+
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+export const WEEKDAY_SHORT_LABELS: Record<Weekday | "sun", string> = {
+  sun: "Sun",
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+};
+
+/** Formats `"YYYY-MM-DD"` as `"Thu, 12 Nov"` without JS Date timezone shifts. */
+export function formatDateWithWeekday(dateStr: string): string {
+  const monthIdx = parseInt(dateStr.slice(5, 7), 10) - 1;
+  const day = parseInt(dateStr.slice(8, 10), 10);
+  const weekday = WEEKDAY_SHORT_LABELS[getWeekdayKey(dateStr)];
+  const month = MONTH_NAMES[monthIdx] ?? dateStr.slice(5, 7);
+  return `${weekday}, ${day} ${month}`;
+}
 
 /** Formats attended/total as a truncated 1-decimal percentage string (no rounding up). */
 export function formatPctTruncated(attended: number, total: number): string {

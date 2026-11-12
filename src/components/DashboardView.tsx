@@ -10,7 +10,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { AlertTriangle, Sparkles, Clock } from "lucide-react";
+import { AlertTriangle, Sparkles, Clock, CalendarCheck } from "lucide-react";
 import {
   isSafe,
   skipBuffer,
@@ -38,6 +38,8 @@ import {
 
 interface DashboardViewProps {
   todayDate: string;
+  onOpenCatchUp?: () => void;
+  onOpenSchedule?: () => void;
 }
 
 const TONE_TEXT: Record<SafetyTone, string> = {
@@ -102,7 +104,11 @@ function ThresholdProgressBar({
 // Component
 // ---------------------------------------------------------------------------
 
-export function DashboardView({ todayDate }: DashboardViewProps) {
+export function DashboardView({
+  todayDate,
+  onOpenCatchUp,
+  onOpenSchedule,
+}: DashboardViewProps) {
   const subjects = useEffectiveSubjects();
   const pendingDLs = usePendingDLs();
   const catchUp = useAppCatchUpQueue(todayDate);
@@ -284,16 +290,38 @@ export function DashboardView({ todayDate }: DashboardViewProps) {
         )}
       </section>
 
-      {/* Catch-Up Queue Alert */}
-      {catchUp && catchUp.length > 0 && (
-        <div className="flex items-center gap-2.5 px-3.5 py-2.5 bg-amber-950/40 border border-amber-500/30 rounded-xl text-amber-200 text-xs">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>
-            <strong>{catchUp.length}</strong>{" "}
-            {catchUp.length === 1 ? "day needs" : "days need"} attendance logging
-            (oldest: <span className="font-mono">{catchUp[0]?.date}</span>)
+      {/* Catch-Up Queue Alert / Subtle Log Today's Classes CTA */}
+      {catchUp && catchUp.length > 0 ? (
+        <button
+          type="button"
+          onClick={onOpenCatchUp}
+          className="w-full flex items-center justify-between gap-2.5 px-3.5 py-2.5 bg-amber-950/40 hover:bg-amber-950/60 border border-amber-500/35 rounded-xl text-amber-200 text-xs text-left transition"
+        >
+          <span className="flex items-center gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="truncate">
+              <strong>{catchUp.length}</strong>{" "}
+              {catchUp.length === 1 ? "day needs" : "days need"} attendance logging
+              (oldest: <span className="font-mono">{catchUp[0]?.date}</span>)
+            </span>
           </span>
-        </div>
+          <span className="font-semibold text-amber-300 whitespace-nowrap shrink-0">
+            Log Now →
+          </span>
+        </button>
+      ) : (
+        catchUp && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={onOpenSchedule ?? onOpenCatchUp}
+              className="inline-flex items-center gap-1.5 text-xs text-gray-300 hover:text-white px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-800 transition"
+            >
+              <CalendarCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+              Log Today&apos;s Classes
+            </button>
+          </div>
+        )
       )}
 
       {/* Upgraded Subject Cards List */}

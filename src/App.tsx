@@ -1,11 +1,12 @@
 /**
- * App.tsx — Mobile App Shell & Bottom Tab Navigation (Step 6).
+ * App.tsx — Mobile App Shell & 4-Tab Bottom Navigation (Step 7).
  *
  * Responsibilities:
  *  - Seeds IndexedDB on first launch.
  *  - Constrains layout to a mobile-first shell (`max-w-lg mx-auto min-h-screen pb-24`).
  *  - Renders sticky top header with `75% / seventy-five`, Sync ETLAB, and Quick Edit.
- *  - Routes between Dashboard, Simulator, and Data & Backup via Bottom Navigation.
+ *  - Routes between Dashboard, Schedule, Simulator, and Data & Backup via Bottom Navigation.
+ *  - Manages EtlSyncModal, QuickCalibrationDrawer, and CatchUpModal.
  */
 
 import { useEffect, useState } from "react";
@@ -14,15 +15,19 @@ import {
   Camera,
   PenLine,
   Home,
-  SlidersHorizontal,
+  Calendar,
+  Sliders,
   Database,
 } from "lucide-react";
 import { seedDatabase } from "@/db/seed";
+import { useAppCatchUpQueue } from "@/hooks/useAttendanceStore";
 import { DashboardView } from "@/components/DashboardView";
+import { ScheduleView } from "@/components/ScheduleView";
 import { SimulatorView } from "@/components/SimulatorView";
 import { DataBackupView } from "@/components/DataBackupView";
 import { EtlSyncModal } from "@/components/EtlSyncModal";
 import { QuickCalibrationDrawer } from "@/components/QuickCalibrationDrawer";
+import { CatchUpModal } from "@/components/CatchUpModal";
 
 // Today's local date (derived once in UI shell, passed as ISO string to engine/views)
 function localTodayIso(): string {
@@ -35,7 +40,7 @@ function localTodayIso(): string {
 
 const TODAY = localTodayIso();
 
-type ActiveTab = "dashboard" | "simulator" | "data";
+type ActiveTab = "dashboard" | "schedule" | "simulator" | "data";
 
 const NAV_ITEMS: Array<{
   id: ActiveTab;
@@ -43,7 +48,8 @@ const NAV_ITEMS: Array<{
   Icon: typeof Home;
 }> = [
   { id: "dashboard", label: "Dashboard", Icon: Home },
-  { id: "simulator", label: "Simulator", Icon: SlidersHorizontal },
+  { id: "schedule", label: "Schedule", Icon: Calendar },
+  { id: "simulator", label: "Simulator", Icon: Sliders },
   { id: "data", label: "Data & Backup", Icon: Database },
 ];
 
@@ -52,6 +58,10 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [calibOpen, setCalibOpen] = useState(false);
+  const [catchUpOpen, setCatchUpOpen] = useState(false);
+
+  const catchUpQueue = useAppCatchUpQueue(TODAY);
+  const catchUpCount = catchUpQueue?.length ?? 0;
 
   useEffect(() => {
     seedDatabase()
@@ -102,17 +112,29 @@ export default function App() {
 
       {/* Main Content */}
       <main className="px-4 pt-4">
-        {activeTab === "dashboard" && <DashboardView todayDate={TODAY} />}
+        {activeTab === "dashboard" && (
+          <DashboardView
+            todayDate={TODAY}
+            onOpenCatchUp={() => setCatchUpOpen(true)}
+            onOpenSchedule={() => setActiveTab("schedule")}
+          />
+        )}
+        {activeTab === "schedule" && (
+          <ScheduleView
+            todayDate={TODAY}
+            onOpenCatchUp={() => setCatchUpOpen(true)}
+          />
+        )}
         {activeTab === "simulator" && <SimulatorView todayDate={TODAY} />}
         {activeTab === "data" && <DataBackupView todayDate={TODAY} />}
       </main>
 
-      {/* Sticky Bottom Navigation Bar */}
+      {/* Sticky 4-Tab Bottom Navigation Bar */}
       <nav
         aria-label="Primary navigation"
         className="fixed bottom-0 inset-x-0 z-30 bg-gray-950/95 backdrop-blur border-t border-gray-800"
       >
-        <div className="max-w-lg mx-auto grid grid-cols-3">
+        <div className="max-w-lg mx-auto grid grid-cols-4">
           {NAV_ITEMS.map(({ id, label, Icon }) => {
             const active = activeTab === id;
             return (
@@ -126,8 +148,18 @@ export default function App() {
                     : "text-gray-500 hover:text-gray-300"
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                <span>{label}</span>
+                <div className="relative">
+                  <Icon className="w-5 h-5" />
+                  {id === "schedule" && catchUpCount > 0 && (
+                    <span
+                      aria-label={`${catchUpCount} pending catch-up days`}
+                      className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-gray-950 text-[10px] font-bold flex items-center justify-center leading-none tabular-nums"
+                    >
+                      {catchUpCount > 9 ? "9+" : catchUpCount}
+                    </span>
+                  )}
+                </div>
+                <span className="truncate max-w-full px-1">{label}</span>
               </button>
             );
           })}
@@ -142,6 +174,11 @@ export default function App() {
       <QuickCalibrationDrawer
         isOpen={calibOpen}
         onClose={() => setCalibOpen(false)}
+      />
+      <CatchUpModal
+        isOpen={catchUpOpen}
+        onClose={() => setCatchUpOpen(false)}
+        todayDate={TODAY}
       />
     </div>
   );
