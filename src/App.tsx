@@ -1,319 +1,138 @@
 /**
- * App.tsx — Root component (Step 5: OCR Sync + Quick Calibration wired in).
+ * App.tsx — Mobile App Shell & Bottom Tab Navigation (Step 6).
  *
  * Responsibilities:
- *  - Seeds the database on first launch.
- *  - Shows the overall attendance summary from IndexedDB (live-reactive).
- *  - Renders the Catch-Up Queue badge.
- *  - Provides Export and Import backup buttons.
- *  - Opens EtlSyncModal (ETLAB screenshot OCR sync).
- *  - Opens QuickCalibrationDrawer (manual number entry).
- *  - Footer: Reset Demo Data button.
+ *  - Seeds IndexedDB on first launch.
+ *  - Constrains layout to a mobile-first shell (`max-w-lg mx-auto min-h-screen pb-24`).
+ *  - Renders sticky top header with `75% / seventy-five`, Sync ETLAB, and Quick Edit.
+ *  - Routes between Dashboard, Simulator, and Data & Backup via Bottom Navigation.
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
-  Download,
-  Upload,
   BookOpen,
-  AlertTriangle,
-  CheckCircle2,
   Camera,
   PenLine,
-  RotateCcw,
+  Home,
+  SlidersHorizontal,
+  Database,
 } from "lucide-react";
 import { seedDatabase } from "@/db/seed";
-import { db } from "@/db/database";
-import {
-  useEffectiveSubjects,
-  useOverallAttendance,
-  useCatchUpQueue,
-} from "@/hooks/useAttendanceStore";
-import { exportAppDataJSON, importAppDataJSON } from "@/utils/backup";
-import { isSafe, skipBuffer } from "@/engine/attendance";
+import { DashboardView } from "@/components/DashboardView";
+import { SimulatorView } from "@/components/SimulatorView";
+import { DataBackupView } from "@/components/DataBackupView";
 import { EtlSyncModal } from "@/components/EtlSyncModal";
 import { QuickCalibrationDrawer } from "@/components/QuickCalibrationDrawer";
 
-// ---------------------------------------------------------------------------
-// Today's date — derived once at render time, never from new Date() in engine
-// ---------------------------------------------------------------------------
-const TODAY = new Date().toISOString().slice(0, 10);
-// A simple "last checked" fallback — in a future step this will come from profile
-const LAST_CHECKED = new Date(Date.now() - 7 * 86_400_000)
-  .toISOString()
-  .slice(0, 10);
+// Today's local date (derived once in UI shell, passed as ISO string to engine/views)
+function localTodayIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
-// ---------------------------------------------------------------------------
-// Root App
-// ---------------------------------------------------------------------------
+const TODAY = localTodayIso();
+
+type ActiveTab = "dashboard" | "simulator" | "data";
+
+const NAV_ITEMS: Array<{
+  id: ActiveTab;
+  label: string;
+  Icon: typeof Home;
+}> = [
+  { id: "dashboard", label: "Dashboard", Icon: Home },
+  { id: "simulator", label: "Simulator", Icon: SlidersHorizontal },
+  { id: "data", label: "Data & Backup", Icon: Database },
+];
 
 export default function App() {
   const [seeded, setSeeded] = useState(false);
-  const [importStatus, setImportStatus] = useState<"idle" | "ok" | "error">(
-    "idle"
-  );
-  const [importMsg, setImportMsg] = useState("");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("dashboard");
   const [syncModalOpen, setSyncModalOpen] = useState(false);
   const [calibOpen, setCalibOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  // Seed on first mount
   useEffect(() => {
     seedDatabase()
       .then(() => setSeeded(true))
       .catch(console.error);
   }, []);
 
-  const overall = useOverallAttendance();
-  const subjects = useEffectiveSubjects();
-  const catchUp = useCatchUpQueue(LAST_CHECKED, TODAY);
-
-  // ---------------------------------------------------------------------------
-  // Backup handlers
-  // ---------------------------------------------------------------------------
-
-  async function handleExport() {
-    const json = await exportAppDataJSON();
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `75pct-backup-${TODAY}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      await importAppDataJSON(text);
-      setImportStatus("ok");
-      setImportMsg("Backup restored successfully.");
-    } catch (err) {
-      setImportStatus("error");
-      setImportMsg(err instanceof Error ? err.message : "Unknown error.");
-    }
-    // Reset input so the same file can be re-selected
-    if (fileRef.current) fileRef.current.value = "";
-  }
-
-  // ---------------------------------------------------------------------------
-  // Reset demo data
-  // ---------------------------------------------------------------------------
-
-  async function handleResetDemo() {
-    if (
-      !window.confirm(
-        "Reset all data and reload the S5 CSE-AI demo? This cannot be undone."
-      )
-    )
-      return;
-
-    try {
-      // Clear all tables (Dexie transaction across all tables)
-      await db.transaction(
-        "rw",
-        [
-          db.profile,
-          db.subjects,
-          db.timetable,
-          db.calendarOverrides,
-          db.dailyLogs,
-          db.dlRecords,
-        ],
-        async () => {
-          await Promise.all([
-            db.profile.clear(),
-            db.subjects.clear(),
-            db.timetable.clear(),
-            db.calendarOverrides.clear(),
-            db.dailyLogs.clear(),
-            db.dlRecords.clear(),
-          ]);
-        }
-      );
-      await seedDatabase();
-      setImportStatus("ok");
-      setImportMsg("Demo data reset.");
-    } catch (err) {
-      setImportStatus("error");
-      setImportMsg(err instanceof Error ? err.message : "Reset failed.");
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   if (!seeded) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
-        <p className="text-gray-400 animate-pulse">Opening database…</p>
+        <p className="text-sm text-gray-400 animate-pulse">Opening database…</p>
       </div>
     );
   }
 
-  const safe = overall ? isSafe(overall.attended, overall.total) : true;
-  const buffer = overall ? skipBuffer(overall.attended, overall.total) : 0;
-  const pct =
-    overall && overall.total > 0
-      ? Math.floor((overall.attended * 1000) / overall.total) / 10
-      : 0;
-
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-4 font-sans pb-20">
-      {/* Header */}
-      <header className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-2">
-          <BookOpen className="w-6 h-6 text-indigo-400" />
-          <h1 className="text-xl font-bold tracking-tight">75%</h1>
+    <div className="max-w-lg mx-auto min-h-screen pb-24 bg-gray-950 text-white font-sans">
+      {/* Sticky Top Header */}
+      <header className="sticky top-0 z-30 bg-gray-950/90 backdrop-blur border-b border-gray-800/80 px-4 py-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <BookOpen className="w-5 h-5 text-indigo-400 shrink-0" />
+          <div className="leading-none">
+            <h1 className="text-base font-extrabold tracking-tight">75%</h1>
+            <p className="text-[10px] text-gray-500 font-medium">seventy-five</p>
+          </div>
         </div>
-        <div className="flex gap-2 flex-wrap justify-end">
-          {/* ETLAB Sync */}
+
+        <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={() => setSyncModalOpen(true)}
-            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 transition"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white whitespace-nowrap shrink-0 transition"
           >
-            <Camera className="w-4 h-4" />
+            <Camera className="w-3.5 h-3.5 shrink-0" />
             Sync ETLAB
           </button>
 
-          {/* Quick Edit */}
           <button
+            type="button"
             onClick={() => setCalibOpen(true)}
-            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 whitespace-nowrap shrink-0 transition"
           >
-            <PenLine className="w-4 h-4" />
+            <PenLine className="w-3.5 h-3.5 shrink-0" />
             Quick Edit
           </button>
-
-          {/* Export */}
-          <button
-            onClick={handleExport}
-            className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition"
-          >
-            <Download className="w-4 h-4" />
-            Export
-          </button>
-
-          {/* Import */}
-          <label className="flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 transition cursor-pointer">
-            <Upload className="w-4 h-4" />
-            Import
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".json"
-              className="sr-only"
-              onChange={handleImport}
-            />
-          </label>
         </div>
       </header>
 
-      {/* Import / status banner */}
-      {importStatus !== "idle" && (
-        <div
-          className={`flex items-center gap-2 mb-4 p-3 rounded-lg text-sm ${
-            importStatus === "ok"
-              ? "bg-green-900/50 text-green-300"
-              : "bg-red-900/50 text-red-300"
-          }`}
-        >
-          {importStatus === "ok" ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-          )}
-          {importMsg}
-        </div>
-      )}
+      {/* Main Content */}
+      <main className="px-4 pt-4">
+        {activeTab === "dashboard" && <DashboardView todayDate={TODAY} />}
+        {activeTab === "simulator" && <SimulatorView todayDate={TODAY} />}
+        {activeTab === "data" && <DataBackupView todayDate={TODAY} />}
+      </main>
 
-      {/* Overall card */}
-      <section className="bg-gray-900 rounded-2xl p-5 mb-4">
-        <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">
-          Overall
-        </p>
-        <div className="flex items-end gap-2">
-          <span
-            className={`text-5xl font-black tabular-nums ${
-              safe ? "text-white" : "text-red-400"
-            }`}
-          >
-            {pct.toFixed(1)}%
-          </span>
-          <span className="text-gray-400 text-sm mb-1">
-            {overall?.attended ?? 0}/{overall?.total ?? 0} hrs
-          </span>
-        </div>
-        <p className={`mt-2 text-sm ${safe ? "text-green-400" : "text-red-400"}`}>
-          {safe
-            ? `You can skip ${buffer}h more and stay safe.`
-            : `Attend ${
-                overall ? 3 * overall.total - 4 * overall.attended : 0
-              }h to recover.`}
-        </p>
-      </section>
-
-      {/* Catch-up queue badge */}
-      {catchUp && catchUp.length > 0 && (
-        <div className="flex items-center gap-2 mb-4 p-3 bg-amber-900/40 rounded-xl text-amber-300 text-sm">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {catchUp.length} day{catchUp.length > 1 ? "s" : ""} need attendance logging
-          (oldest: {catchUp[0]?.date})
-        </div>
-      )}
-
-      {/* Subject list */}
-      <section>
-        <h2 className="text-xs text-gray-500 uppercase tracking-widest mb-2">
-          Subjects
-        </h2>
-        <ul className="space-y-2">
-          {subjects?.map((s) => {
-            const subSafe = isSafe(s.attended, s.total);
-            const subBuf = skipBuffer(s.attended, s.total);
-            const subPct =
-              s.total > 0 ? Math.floor((s.attended * 1000) / s.total) / 10 : 0;
+      {/* Sticky Bottom Navigation Bar */}
+      <nav
+        aria-label="Primary navigation"
+        className="fixed bottom-0 inset-x-0 z-30 bg-gray-950/95 backdrop-blur border-t border-gray-800"
+      >
+        <div className="max-w-lg mx-auto grid grid-cols-3">
+          {NAV_ITEMS.map(({ id, label, Icon }) => {
+            const active = activeTab === id;
             return (
-              <li
-                key={s.id}
-                className="flex items-center justify-between bg-gray-900 rounded-xl px-4 py-3"
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveTab(id)}
+                className={`flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition ${
+                  active
+                    ? "text-indigo-400"
+                    : "text-gray-500 hover:text-gray-300"
+                }`}
               >
-                <div>
-                  <p className="font-medium text-sm">{s.name}</p>
-                  <p className="text-xs text-gray-500">{s.code}</p>
-                </div>
-                <div className="text-right">
-                  <p
-                    className={`font-bold tabular-nums ${
-                      subSafe ? "text-white" : "text-red-400"
-                    }`}
-                  >
-                    {subPct.toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {s.attended}/{s.total} · buf {subBuf}h
-                  </p>
-                </div>
-              </li>
+                <Icon className="w-5 h-5" />
+                <span>{label}</span>
+              </button>
             );
           })}
-        </ul>
-      </section>
-
-      {/* Footer */}
-      <footer className="fixed bottom-0 inset-x-0 p-3 bg-gray-950/90 border-t border-gray-800 backdrop-blur flex justify-center">
-        <button
-          onClick={handleResetDemo}
-          className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-red-400 transition px-3 py-1.5 rounded-lg hover:bg-gray-800"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Reset Demo Data
-        </button>
-      </footer>
+        </div>
+      </nav>
 
       {/* Modals */}
       <EtlSyncModal

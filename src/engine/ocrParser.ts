@@ -657,9 +657,19 @@ function extractCodeSlotMatches(text: string): CodeSlotMatch[] {
  * mangled parens, fused fractions (`64179`), garbled numerators (`do/48`),
  * missing fractions (recovered from `Missed + %`), and merged faculty rows.
  */
-export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
+/**
+ * Internal variant of `parseSingleEtlabOcrText` that also returns the exact set
+ * of cards whose fraction had to be recovered via `Missed+Percent` arithmetic,
+ * allowing multi-image merge to tie-break ambiguous rounding pairs against the
+ * ETLAB overall header.
+ */
+function parseSingleEtlabOcrTextWithTracking(rawText: string): {
+  result: SingleOcrParseResult;
+  missedPercentRecoveredCards: Set<ParsedEtlabCard>;
+} {
   const normalized = rawText.replace(/\r\n?/g, "\n");
   const warnings: string[] = [];
+  const missedPercentRecoveredCards = new Set<ParsedEtlabCard>();
 
   const { header: overallHeader, remainingText } = extractOverallHeader(normalized);
   const matches = extractCodeSlotMatches(remainingText);
@@ -811,6 +821,7 @@ export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
     }
 
     // 7. Missing-fraction recovery from Missed + Percent
+    let recoveredViaMissedPercent = false;
     if (attended === null || total === null) {
       const recovered = recoverFractionFromMissedAndPercent(
         missed,
@@ -821,6 +832,7 @@ export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
       if (recovered) {
         attended = recovered.attended;
         total = recovered.total;
+        recoveredViaMissedPercent = true;
         warnings.push(
           `Recovered fraction for ${current.code} from Missed+Percent: ${attended}/${total}.`
         );
@@ -858,10 +870,75 @@ export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
       ...(creditWise !== undefined ? { creditWise } : {}),
     };
 
+    if (recoveredViaMissedPercent) {
+      missedPercentRecoveredCards.add(card);
+    }
+
     cards.push(card);
   }
 
-  return { overallHeader, cards, warnings };
+  return {
+    result: { overallHeader, cards, warnings },
+    missedPercentRecoveredCards,
+  };
+}
+
+/**
+ * Parses raw OCR text from a single ETLAB "By Course" screenshot.
+ *
+ * Resilient to noisy spacing, OCR digit/letter confusion in course codes,
+ * mangled parens, fused fractions (`64179`), garbled numerators (`do/48`),
+ * missing fractions (recovered from `Missed + %`), and merged faculty rows.
+ */
+export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
+  return parseSingleEtlabOcrTextWithTracking(rawText).result;
+}
+
+/**
+ * Resolves rounding ambiguity on cards whose fraction was estimated from
+ * `Missed+Percent` when `overallHeader` differs by a small equal delta
+ * (`deltaAtt === deltaTot`, `|delta| <= 5`) — e.g. `40/54` (74.07%) → `39/53` (73.58%).
+ */
+function resolveHeaderTieBreakOnRecoveredCards(
+  overallHeader: EtlabOverallHeader,
+  cards: ParsedEtlabCard[],
+  missedPercentCards: WeakSet<ParsedEtlabCard>,
+  warnings: string[]
+): void {
+  const sumAttended = cards.reduce((sum, c) => sum + c.attended, 0);
+  const sumTotal = cards.reduce((sum, c) => sum + c.total, 0);
+  const deltaAtt = overallHeader.attended - sumAttended;
+  const deltaTot = overallHeader.total - sumTotal;
+
+  if (deltaAtt === 0 || deltaAtt !== deltaTot || Math.abs(deltaAtt) > 5) {
+    return;
+  }
+
+  for (const card of cards) {
+    if (!missedPercentCards.has(card)) continue;
+
+    const candAtt = card.attended + deltaAtt;
+    const candTot = card.total + deltaTot;
+    if (candTot <= 0 || candAtt < 0 || candAtt > candTot) continue;
+
+    const arithOk = candTot - card.missed - card.leave - card.dutyLeave === candAtt;
+    const pctOk = roundedPercent(candAtt, candTot) === card.displayedPercent;
+
+    if (arithOk && pctOk) {
+      const prevFraction = `${card.attended}/${card.total}`;
+      card.attended = candAtt;
+      card.total = candTot;
+
+      const prefix = `Recovered fraction for ${card.code} from Missed+Percent: `;
+      const replacement = `${prefix}${candAtt}/${candTot} (resolved via header checksum from ${prevFraction}).`;
+      for (let i = 0; i < warnings.length; i++) {
+        if (warnings[i]?.startsWith(prefix)) {
+          warnings[i] = replacement;
+        }
+      }
+      break;
+    }
+  }
 }
 
 /**
@@ -871,6 +948,7 @@ export function parseSingleEtlabOcrText(rawText: string): SingleOcrParseResult {
  * - Deduplicates cards by `code` while preserving top-to-bottom order.
  * - Prefers a duplicate that passes per-card arithmetic checksum over a
  *   partially cut-off version missing Missed/Leave/Duty Leave lines.
+ * - Resolves ambiguous `Missed+Percent` candidates against `overallHeader`.
  * - Runs `validateEtlExtract` when `overallHeader` is present.
  * - Returns `rawTexts` so the UI can show a debug view.
  */
@@ -879,12 +957,18 @@ export function mergeAndValidateOcrExtracts(
 ): MultiOcrParseResult {
   let overallHeader: EtlabOverallHeader | null = null;
   const byCode = new Map<string, ParsedEtlabCard>();
+  const missedPercentCards = new WeakSet<ParsedEtlabCard>();
   let duplicatesRemoved = 0;
   const warnings: string[] = [];
 
   for (const text of rawTexts) {
-    const parsed = parseSingleEtlabOcrText(text);
+    const { result: parsed, missedPercentRecoveredCards } =
+      parseSingleEtlabOcrTextWithTracking(text);
     warnings.push(...parsed.warnings);
+
+    for (const recoveredCard of missedPercentRecoveredCards) {
+      missedPercentCards.add(recoveredCard);
+    }
 
     if (parsed.overallHeader !== null) {
       if (
@@ -907,6 +991,15 @@ export function mergeAndValidateOcrExtracts(
   }
 
   const cards = Array.from(byCode.values());
+  if (overallHeader !== null) {
+    resolveHeaderTieBreakOnRecoveredCards(
+      overallHeader,
+      cards,
+      missedPercentCards,
+      warnings
+    );
+  }
+
   const checksum =
     overallHeader !== null ? validateEtlExtract(overallHeader, cards) : null;
 

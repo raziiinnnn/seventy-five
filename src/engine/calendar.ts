@@ -123,6 +123,18 @@ function saturdayOrdinal(year: number, month: number, day: number): number {
 // Public functions
 // ---------------------------------------------------------------------------
 
+/** Adds `offsetDays` (can be negative or zero) to an ISO `"YYYY-MM-DD"` date string. */
+export function addDaysToDate(dateStr: string, offsetDays: number): string {
+  const { year, month, day } = parseDateStr(dateStr);
+  return jdnToDateStr(toJDN(year, month, day) + offsetDays);
+}
+
+/** Returns the weekday key (`"mon"`..`"sat"`) or `"sun"` for an ISO date string. */
+export function getWeekdayKey(dateStr: string): Weekday | "sun" {
+  const { year, month, day } = parseDateStr(dateStr);
+  return toWeekdayKey(getDayOfWeek(year, month, day)) ?? "sun";
+}
+
 /**
  * Returns true if the given date is a default working day.
  * Mon–Fri are always working days.

@@ -673,6 +673,56 @@ Missed 12   Leave 0   Duty Leave 0
     expect(parsed.cards[0]!.name).toBe("COMPUTER NETWORKS");
     expect(parsed.cards[1]!.name).toBe("THEORY OF COMPUTATION");
   });
+
+  it("tie-breaks PLT-2026 Missed+Percent recovery from 40/54 to 39/53 using overall header 407/489", () => {
+    const eightCardOcrWithoutPltFraction = `
+407 of 489 hours attended
+
+PCCST501 (A)
+COMPUTER NETWORKS   81%   64/79
+Missed 15   Leave 0   Duty Leave 0
+
+PCCAT502 (B)
+INTRODUCTION TO ARTIFICIAL INTELLIGENCE   84%   63/75
+Missed 12   Leave 0   Duty Leave 0
+
+PCCST503 (C)
+MACHINE LEARNING   81%   63/78
+Missed 15   Leave 0   Duty Leave 0
+
+PBCAT504 (D)
+ADVANCED GRAPH ALGORITHM   79%   69/87
+Missed 18   Leave 0   Duty Leave 0
+
+PEAIT523 (E)
+HEALTHCARE ANALYTICS   96%   46/48
+Missed 2   Leave 0   Duty Leave 0
+
+PCCAL507 (L)
+Practical   AI ALGORITHMS LAB   92%   33/36
+Missed 3   Leave 0   Duty Leave 0
+
+PCCSL508 (Q)
+Practical   MACHINE LEARNING LAB   91%   30/33
+Missed 3   Leave 0   Duty Leave 0
+
+PLT-2026 (Z)
+PLACEMENT TRAINING   74%
+Missed 14   Leave 0   Duty Leave 0
+`;
+    const merged = mergeAndValidateOcrExtracts([eightCardOcrWithoutPltFraction]);
+    expect(merged.cards).toHaveLength(8);
+
+    const plt = merged.cards.find((c) => c.code === "PLT-2026");
+    expect(plt).toBeDefined();
+    expect(plt!.attended).toBe(39);
+    expect(plt!.total).toBe(53);
+
+    expect(merged.checksum).not.toBeNull();
+    expect(merged.checksum!.valid).toBe(true);
+    expect(merged.checksum!.headerMismatch).toBeNull();
+    expect(merged.warnings.some((w) => w.includes("39/53"))).toBe(true);
+  });
 });
 
 

@@ -1,2 +1,10 @@
 @import "tailwindcss";
 
+@layer base {
+  html,
+  body {
+    background-color: #030712;
+    color: #ffffff;
+    -webkit-tap-highlight-color: transparent;
+  }
+}

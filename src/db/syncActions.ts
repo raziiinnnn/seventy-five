@@ -77,7 +77,7 @@ function parsedCardToSnapshot(card: ParsedEtlabCard): EtlabSnapshot {
  * Preserving the matched SubjectRow lets callers keep `existing.id` so logs
  * and DL records reconcile against the existing subject instead of creating a duplicate.
  */
-function findMatchingSubject(
+export function findMatchingSubject(
   subjectRows: SubjectRow[],
   card: ParsedEtlabCard
 ): SubjectRow | undefined {
@@ -104,6 +104,7 @@ function findMatchingSubject(
 export interface SyncPreviewItem {
   card: ParsedEtlabCard;
   isNew: boolean;
+  existingName?: string;
   oldAnchor?: EtlabAnchor;
   reconcileResult?: ReconcileResult;
   /** True when the card's total < anchor total — user might have reset ETLAB. */
@@ -158,6 +159,7 @@ export async function previewEtlabSync(
       continue;
     }
 
+    const existingName = existing.name.trim() ? existing.name : undefined;
     const oldAnchor = subjectRowToAnchor(existing);
     const snapshot = parsedCardToSnapshot(card);
     const allowReset = card.total < oldAnchor.total;
@@ -172,10 +174,23 @@ export async function previewEtlabSync(
         engineDLs,
         { walkToDate: syncDateStr, allowReset }
       );
-      results.push({ card, isNew: false, oldAnchor, reconcileResult, allowReset });
+      results.push({
+        card,
+        isNew: false,
+        ...(existingName !== undefined ? { existingName } : {}),
+        oldAnchor,
+        reconcileResult,
+        allowReset,
+      });
     } catch {
       // Surface as a preview item with no reconcileResult so the UI can warn
-      results.push({ card, isNew: false, oldAnchor, allowReset });
+      results.push({
+        card,
+        isNew: false,
+        ...(existingName !== undefined ? { existingName } : {}),
+        oldAnchor,
+        allowReset,
+      });
     }
   }
 
@@ -234,6 +249,7 @@ export async function commitEtlabSync(
       const oldAnchor = subjectRowToAnchor(existing);
       const snapshot = parsedCardToSnapshot(card);
       const allowReset = card.total < oldAnchor.total;
+      const preservedName = existing.name.trim().length > 0 ? existing.name : card.name;
       const resolvedSlot = card.slotLetter || existing.slotLetter;
       const resolvedCredit = card.creditWise ?? existing.creditWise;
 
@@ -249,8 +265,9 @@ export async function commitEtlabSync(
           { walkToDate: syncDateStr, allowReset }
         );
       } catch {
-        // If reconcile fails, hard-update anchor while preserving existing.id
+        // If reconcile fails, hard-update anchor while preserving existing.id and clean name
         await db.subjects.update(existing.id, {
+          name: preservedName,
           attended: card.attended,
           total: card.total,
           missed: card.missed,
@@ -265,8 +282,9 @@ export async function commitEtlabSync(
 
       const { newAnchor, retiredLogs, updatedDLRecords } = reconcileResult;
 
-      // Update subject anchor in-place (preserving existing.id)
+      // Update subject anchor in-place (preserving existing.id and existing non-empty name)
       await db.subjects.update(existing.id, {
+        name: preservedName,
         attended: newAnchor.attended,
         total: newAnchor.total,
         missed: newAnchor.missed,

@@ -15,6 +15,20 @@ import type { Timetable, CalendarOverrides, CatchUpEntry, ScheduledPeriod } from
 import { overallOf } from "@/engine/attendance";
 import type { Subject } from "@/engine/types";
 
+/** Subject enriched with ETLAB anchor metadata and local log overlay breakdown. */
+export interface EffectiveSubject extends Subject {
+  slotLetter?: string;
+  creditWise?: string;
+  asOfDate: string;
+  anchorAttended: number;
+  anchorTotal: number;
+  overlayAttended: number;
+  overlayTotal: number;
+  missed: number;
+  dutyLeave: number;
+  isExamSubject: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Profile
 // ---------------------------------------------------------------------------
@@ -75,6 +89,13 @@ export function timetableRowsToEngineFormat(rows: TimetableRow[]): Timetable {
   return tt;
 }
 
+/** Returns the timetable converted to the engine's Timetable map. */
+export function useTimetable(): Timetable | undefined {
+  const rows = useTimetableRows();
+  if (!rows) return undefined;
+  return timetableRowsToEngineFormat(rows);
+}
+
 // ---------------------------------------------------------------------------
 // Calendar Overrides
 // ---------------------------------------------------------------------------
@@ -113,6 +134,33 @@ export function useCatchUpQueue(lastCheckedDate: string, todayDate: string): Cat
 
     return getCatchUpQueue(lastCheckedDate, todayDate, timetable, overrides, loggedDates);
   }, [timetableRows, overrides, dailyLogs, lastCheckedDate, todayDate]);
+}
+
+/**
+ * Computes the catch-up queue using the minimum `asOfDate` across `db.subjects`
+ * as `lastCheckedDate` (falling back to `todayDate` when no subjects exist).
+ */
+export function useAppCatchUpQueue(todayDate: string): CatchUpEntry[] | undefined {
+  const subjects = useSubjects();
+  const timetableRows = useTimetableRows();
+  const overrides = useCalendarOverrides();
+  const dailyLogs = useDailyLogs();
+
+  if (!subjects || !timetableRows || !overrides || !dailyLogs) return undefined;
+
+  const validAsOfDates = subjects
+    .map((s) => s.asOfDate)
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+
+  const lastCheckedDate =
+    validAsOfDates.length > 0
+      ? validAsOfDates.reduce((min, d) => (d < min ? d : min), validAsOfDates[0]!)
+      : todayDate;
+
+  const timetable = timetableRowsToEngineFormat(timetableRows);
+  const loggedDates = new Set(dailyLogs.map((l) => l.date));
+
+  return getCatchUpQueue(lastCheckedDate, todayDate, timetable, overrides, loggedDates);
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +217,7 @@ export function usePendingDLs(): DLRecordRow[] | undefined {
  * on top of the ETLAB anchors. This is the state the app's main screen should
  * use for all Step 1 calculations (isSafe, skipBuffer, etc.).
  */
-export function useEffectiveSubjects(): Subject[] | undefined {
+export function useEffectiveSubjects(): EffectiveSubject[] | undefined {
   const subjects = useSubjects();
   const logs = useDailyLogs();
 
@@ -206,6 +254,16 @@ export function useEffectiveSubjects(): Subject[] | undefined {
       hoursPerSession: anchor.hoursPerSession,
       attended: anchor.attended + deltaAttended,
       total: anchor.total + deltaTotal,
+      ...(anchor.slotLetter !== undefined ? { slotLetter: anchor.slotLetter } : {}),
+      ...(anchor.creditWise !== undefined ? { creditWise: anchor.creditWise } : {}),
+      asOfDate: anchor.asOfDate,
+      anchorAttended: anchor.attended,
+      anchorTotal: anchor.total,
+      overlayAttended: deltaAttended,
+      overlayTotal: deltaTotal,
+      missed: anchor.missed,
+      dutyLeave: anchor.dutyLeave,
+      isExamSubject: anchor.isExamSubject,
     };
   });
 }

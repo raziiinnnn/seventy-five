@@ -280,17 +280,26 @@ export function EtlSyncModal({ isOpen, onClose }: EtlSyncModalProps) {
         ? { ...result.overallHeader }
         : { attended: 0, total: 0 }
     );
-    setEditableCards(toEditableCards(result.cards));
     setShowRawDebug(false);
     setCopiedRaw(false);
 
+    let preview: SyncPreviewItem[];
     try {
-      const preview = await previewEtlabSync(result.cards, todayStr());
-      setPreviewItems(preview);
+      preview = await previewEtlabSync(result.cards, todayStr());
     } catch {
-      setPreviewItems(result.cards.map((c) => ({ card: c, isNew: false })));
+      preview = result.cards.map((c) => ({ card: c, isNew: false }));
     }
 
+    const cardsWithPreservedNames = result.cards.map((card, idx) => {
+      const item = preview[idx];
+      if (item && !item.isNew && item.existingName && item.existingName.trim()) {
+        return { ...card, name: item.existingName };
+      }
+      return card;
+    });
+
+    setEditableCards(toEditableCards(cardsWithPreservedNames));
+    setPreviewItems(preview);
     setStage(3);
   }
 
