@@ -16,6 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseSingleEtlabOcrText,
   mergeAndValidateOcrExtracts,
+  normalizeCourseCode,
 } from "../ocrParser.js";
 import { validateEtlExtract } from "../checksum.js";
 
@@ -471,6 +472,208 @@ Missed 15  Leave 0  Duty Leave 0
     expect(res.overallHeader).toBeNull();
     expect(res.checksum).toBeNull();
     expect(res.cards).toHaveLength(1);
+    expect(res.rawTexts).toEqual([partialOnly]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. Real-screenshot Tesseract noise recovery & Y-reconstructed rows
+// ---------------------------------------------------------------------------
+describe("Real-screenshot OCR noise recovery", () => {
+  it("recovers 64/79 when Tesseract misreads the slash as 1 (64179) with Missed 15", () => {
+    const fusedText = `
+PCCST501 (A)
+COMPUTER NETWORKS
+Theory   Credit-wise 8 / 10   81%   64179
+Missed 15   Leave 0   Duty Leave 0
+`;
+    const parsed = parseSingleEtlabOcrText(fusedText);
+    expect(parsed.cards).toHaveLength(1);
+    const card = parsed.cards[0]!;
+    expect(card.code).toBe("PCCST501");
+    expect(card.attended).toBe(64);
+    expect(card.total).toBe(79);
+    expect(card.missed).toBe(15);
+    expect(card.displayedPercent).toBe(81);
+    expect(card.name).toBe("COMPUTER NETWORKS");
+  });
+
+  it("recovers 64/79 from Missed 15 + 81% when fraction inside pill is completely missing", () => {
+    const missingFractionText = `
+PCCST501 (A)
+COMPUTER NETWORKS
+Theory   Credit-wise 8 / 10   81%
+Missed 15   Leave 0   Duty Leave 0
+`;
+    const parsed = parseSingleEtlabOcrText(missingFractionText);
+    expect(parsed.cards).toHaveLength(1);
+    const card = parsed.cards[0]!;
+    expect(card.code).toBe("PCCST501");
+    expect(card.attended).toBe(64);
+    expect(card.total).toBe(79);
+    expect(card.missed).toBe(15);
+    expect(card.displayedPercent).toBe(81);
+  });
+
+  it("handles mangled slot parens (PCCST501 A Theory) and noisy header (4O7 0f 489 hours attended)", () => {
+    const noisyHeaderAndSlot = `
+4O7 0f 489 hours attended
+
+PCCST501 A Theory
+COMPUTER NETWORKS   81%   64/79
+Missed 15   Leave 0   Duty Leave 0
+
+PCCAT502 IBI
+INTRODUCTION TO ARTIFICIAL INTELLIGENCE   84%   63/75
+Missed 12   Leave 0   Duty Leave 0
+
+PLT-2026 (Z)   74%
+PLACEMENT TRAINING   39/53
+Missed 14   Leave 0   Duty Leave 0
+`;
+    const res = mergeAndValidateOcrExtracts([noisyHeaderAndSlot]);
+    expect(res.overallHeader).toEqual({ attended: 407, total: 489 });
+    expect(res.rawTexts).toEqual([noisyHeaderAndSlot]);
+    expect(res.cards).toHaveLength(3);
+
+    const net = res.cards[0]!;
+    expect(net.code).toBe("PCCST501");
+    expect(net.slotLetter).toBe("A");
+    expect(net.kind).toBe("theory");
+    expect(net.name).toBe("COMPUTER NETWORKS");
+    expect(net.attended).toBe(64);
+    expect(net.total).toBe(79);
+
+    const ai = res.cards[1]!;
+    expect(ai.code).toBe("PCCAT502");
+    expect(ai.slotLetter).toBe("B");
+    expect(ai.name).toBe("INTRODUCTION TO ARTIFICIAL INTELLIGENCE");
+    expect(ai.attended).toBe(63);
+    expect(ai.total).toBe(75);
+
+    const plt = res.cards[2]!;
+    expect(plt.code).toBe("PLT-2026");
+    expect(plt.slotLetter).toBe("Z");
+    expect(plt.name).toBe("PLACEMENT TRAINING");
+    expect(plt.attended).toBe(39);
+    expect(plt.total).toBe(53);
+  });
+
+  it("supports '407/489 hrs' overall header and missing slot parens without consuming title words", () => {
+    const missingParensText = `
+407/489 hrs
+
+PCCAT502
+INTRODUCTION TO AI   84%   63/75
+Missed 12   Leave 0   Duty Leave 0
+`;
+    const res = mergeAndValidateOcrExtracts([missingParensText]);
+    expect(res.overallHeader).toEqual({ attended: 407, total: 489 });
+    expect(res.cards).toHaveLength(1);
+    expect(res.cards[0]!.code).toBe("PCCAT502");
+    expect(res.cards[0]!.slotLetter).toBe("");
+    expect(res.cards[0]!.name).toBe("INTRODUCTION TO AI");
+    expect(res.cards[0]!.attended).toBe(63);
+    expect(res.cards[0]!.total).toBe(75);
+  });
+
+  it("normalizes course codes with digit/letter confusion (PCCATS02, PCCSTS03, PBCATS04, PEAITS23, PCCALS007)", () => {
+    expect(normalizeCourseCode("PCCATS02")).toBe("PCCAT502");
+    expect(normalizeCourseCode("PCCSTS03")).toBe("PCCST503");
+    expect(normalizeCourseCode("PBCATS04")).toBe("PBCAT504");
+    expect(normalizeCourseCode("PEAITS23")).toBe("PEAIT523");
+    expect(normalizeCourseCode("PCCALS007")).toBe("PCCAL507");
+
+    const mangledCodesText = `
+PCCATS02 (B)
+INTRODUCTION TO ARTIFICIAL INTELLIGENCE   84%   63/75
+Missed 12
+
+PCCSTS03 (C)
+MACHINE LEARNING   81%   63/78
+Missed 15
+
+PBCATS04 (D)
+ADVANCED GRAPH ALGORITHM   79%   69/87
+Missed 18
+
+PEAITS23 (E)
+HEALTHCARE ANALYTICS   96%   46/48
+Missed 2
+
+PCCALS007 (L)
+Practical   AI ALGORITHMS LAB   92%   33/36
+Missed 3
+`;
+    const parsed = parseSingleEtlabOcrText(mangledCodesText);
+    expect(parsed.cards.map((c) => c.code)).toEqual([
+      "PCCAT502",
+      "PCCST503",
+      "PBCAT504",
+      "PEAIT523",
+      "PCCAL507",
+    ]);
+  });
+
+  it("recovers exact 46/48 from garbled numerator 'do/48' + Missed 2 + 96% (not 48/50)", () => {
+    const partialDenomText = `
+PEAITS23 (E)
+Program Elective & HEALTHCARE ANALYTICS ® BINJU SAJU do/48
+96%
+Credit-wise 10 / 10
+Missed 2   Leave 0   Duty Leave 0
+`;
+    const parsed = parseSingleEtlabOcrText(partialDenomText);
+    expect(parsed.cards).toHaveLength(1);
+    const card = parsed.cards[0]!;
+    expect(card.code).toBe("PEAIT523");
+    expect(card.attended).toBe(46);
+    expect(card.total).toBe(48);
+    expect(card.name).toBe("HEALTHCARE ANALYTICS");
+  });
+
+  it("matches PLT-2O26 (2) and PLT 2026 variants as PLT-2026 with slot Z", () => {
+    const pltVariants = `
+PLT-2O26 (2)
+No University Exam and No Internal Exam & PLACEMENT TRAINING ® TRAINER
+74%   39/53
+Missed 14   Leave 0   Duty Leave 0
+`;
+    const parsed1 = parseSingleEtlabOcrText(pltVariants);
+    expect(parsed1.cards).toHaveLength(1);
+    expect(parsed1.cards[0]!.code).toBe("PLT-2026");
+    expect(parsed1.cards[0]!.slotLetter).toBe("Z");
+    expect(parsed1.cards[0]!.name).toBe("PLACEMENT TRAINING");
+
+    const pltSpace = `
+PLT 2026 (2)
+PLACEMENT TRAINING
+74%   39/53
+Missed 14   Leave 0   Duty Leave 0
+`;
+    const parsed2 = parseSingleEtlabOcrText(pltSpace);
+    expect(parsed2.cards).toHaveLength(1);
+    expect(parsed2.cards[0]!.code).toBe("PLT-2026");
+    expect(parsed2.cards[0]!.slotLetter).toBe("Z");
+  });
+
+  it("strips 'Theory & ', 'Program Elective & ', and '® FACULTY NAME' noise from subject names while preserving THEORY OF COMPUTATION", () => {
+    const dirtyNamesText = `
+PCCST501 (A)
+Theory & COMPUTER NETWORKS ® ASWATHY JAYAKRISHNAN sus   81%   64/79
+Credit-wise 8 / 10
+Missed 15   Leave 0   Duty Leave 0
+
+CS307 (B)
+THEORY OF COMPUTATION   84%   63/75
+Missed 12   Leave 0   Duty Leave 0
+`;
+    const parsed = parseSingleEtlabOcrText(dirtyNamesText);
+    expect(parsed.cards).toHaveLength(2);
+    expect(parsed.cards[0]!.name).toBe("COMPUTER NETWORKS");
+    expect(parsed.cards[1]!.name).toBe("THEORY OF COMPUTATION");
+  });
+});
+
+
 
