@@ -1,8 +1,8 @@
 /**
- * DataBackupView — Local backup, class-template sharing, and demo reset tab (Step 6).
+ * DataBackupView — Local backup, class-template sharing, 6pm reminder, and settings tab (Step 8).
  */
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Download,
   Upload,
@@ -12,6 +12,9 @@ import {
   RotateCcw,
   AlertTriangle,
   CheckCircle2,
+  Bell,
+  HardDrive,
+  PenLine,
 } from "lucide-react";
 import { db } from "@/db/database";
 import { seedDatabase } from "@/db/seed";
@@ -26,12 +29,24 @@ import {
   generateClassTemplateString,
   importClassTemplate,
 } from "@/utils/backup";
+import {
+  downloadDailyCheckInICS,
+  getStoragePersistenceStatus,
+  ensurePersistentStorage,
+} from "@/utils/reminders";
+import { OnboardingModal } from "@/components/OnboardingModal";
 
 interface DataBackupViewProps {
   todayDate: string;
+  onOpenSyncModal?: (() => void) | undefined;
+  onSwitchToSettings?: (() => void) | undefined;
 }
 
-export function DataBackupView({ todayDate }: DataBackupViewProps) {
+export function DataBackupView({
+  todayDate,
+  onOpenSyncModal,
+  onSwitchToSettings,
+}: DataBackupViewProps) {
   const profile = useProfile();
   const subjectRows = useSubjects();
   const timetableRows = useTimetableRows();
@@ -42,7 +57,30 @@ export function DataBackupView({ todayDate }: DataBackupViewProps) {
   }>({ kind: "idle", msg: "" });
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [templateInput, setTemplateInput] = useState("");
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [storageStatus, setStorageStatus] = useState<{
+    supported: boolean;
+    persisted: boolean;
+  }>({ supported: false, persisted: false });
+
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getStoragePersistenceStatus().then(setStorageStatus);
+  }, []);
+
+  async function handleRequestPersistence() {
+    const res = await ensurePersistentStorage();
+    setStorageStatus(res);
+    if (res.persisted) {
+      setStatus({ kind: "ok", msg: "Browser granted persistent storage!" });
+    } else {
+      setStatus({
+        kind: "error",
+        msg: "Persistent storage request was not granted by browser.",
+      });
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Full JSON Backup
@@ -190,21 +228,77 @@ export function DataBackupView({ todayDate }: DataBackupViewProps) {
         </div>
       )}
 
-      {/* Local Profile Summary */}
+      {/* Local Profile Summary with Edit Profile button */}
       {profile && (
-        <section className="bg-gray-900 border border-gray-800/80 rounded-2xl p-4 space-y-1">
-          <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">
-            Local Storage Profile
-          </p>
-          <p className="text-sm font-semibold text-white">
-            {profile.branch} · Semester {profile.semester}
-          </p>
-          <p className="text-xs text-gray-400">{profile.department}</p>
-          <p className="text-[11px] text-gray-500 pt-1">
-            100% offline in browser IndexedDB — screenshots never leave this device.
+        <section className="bg-gray-900 border border-gray-800/80 rounded-2xl p-4 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">
+                Student Profile
+              </p>
+              <p className="text-sm font-semibold text-white mt-0.5">
+                {profile.name ? `${profile.name} · ` : ""}
+                {profile.branch} · Semester {profile.semester}
+              </p>
+              <p className="text-xs text-gray-400">{profile.department}</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOnboardingOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 transition shrink-0"
+            >
+              <PenLine className="w-3.5 h-3.5" />
+              Edit Profile
+            </button>
+          </div>
+
+          <p className="text-[11px] text-gray-500 pt-1 border-t border-gray-800/80">
+            100% offline in browser IndexedDB — data and screenshots never leave this device.
           </p>
         </section>
       )}
+
+      {/* Daily 6:00 PM Check-In Reminder (.ics) & Storage Status */}
+      <section className="bg-gray-900 border border-gray-800/80 rounded-2xl p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-0.5">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-1.5">
+              <Bell className="w-4 h-4 text-indigo-400" />
+              Daily 6:00 PM Check-In Reminder
+            </h2>
+            <p className="text-xs text-gray-400">
+              Download an .ics calendar file that rings every college day (Mon–Sat) at 6:00 PM.
+            </p>
+          </div>
+
+          {/* Storage persistence badge */}
+          <div className="shrink-0 flex items-center gap-1">
+            <HardDrive className="w-3.5 h-3.5 text-gray-400" />
+            <button
+              type="button"
+              onClick={handleRequestPersistence}
+              title="Click to request persistent storage"
+              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border transition ${
+                storageStatus.persisted
+                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                  : "bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25"
+              }`}
+            >
+              {storageStatus.persisted ? "Persisted" : "Best-Effort (Tap)"}
+            </button>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => downloadDailyCheckInICS()}
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+        >
+          <Bell className="w-4 h-4 shrink-0" />
+          Download 6:00 PM Reminder (.ics)
+        </button>
+      </section>
 
       {/* Full JSON Backup */}
       <section className="bg-gray-900 border border-gray-800/80 rounded-2xl p-4 space-y-3">
@@ -219,13 +313,13 @@ export function DataBackupView({ todayDate }: DataBackupViewProps) {
           <button
             type="button"
             onClick={handleExport}
-            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+            className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white text-xs font-semibold transition"
           >
             <Download className="w-4 h-4 shrink-0" />
             Export JSON
           </button>
 
-          <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-semibold transition cursor-pointer">
+          <label className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-200 text-xs font-semibold transition cursor-pointer">
             <Upload className="w-4 h-4 shrink-0" />
             Import JSON
             <input
@@ -306,7 +400,14 @@ export function DataBackupView({ todayDate }: DataBackupViewProps) {
           Reset Demo Data
         </button>
       </section>
+
+      {/* Profile Modal */}
+      <OnboardingModal
+        isOpen={onboardingOpen}
+        onClose={() => setOnboardingOpen(false)}
+        onOpenSyncModal={onOpenSyncModal}
+        onSwitchToSettings={onSwitchToSettings}
+      />
     </div>
   );
 }
-
